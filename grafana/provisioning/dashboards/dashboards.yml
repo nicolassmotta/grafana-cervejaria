@@ -1,0 +1,10 @@
+# Carrega todo .json de /etc/grafana/dashboards como dashboard, dentro da pasta "Cervejaria".
+apiVersion: 1
+
+providers:
+  - name: cervejaria
+    folder: Cervejaria
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards

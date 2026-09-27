@@ -1,0 +1,56 @@
+# Regra de alerta: dispara quando algum tanque passa da temperatura máxima do seu estilo.
+# O Grafana roda a query a cada 10s e cria um alerta separado para cada tanque (cada linha do resultado).
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Tanques de fermentação
+    folder: Cervejaria
+    interval: 10s
+    rules:
+      - uid: temperatura-acima-do-limite
+        title: Temperatura acima do limite
+        condition: C
+        data:
+          # A: quantos °C cada tanque está acima do seu limite (negativo = dentro da faixa)
+          - refId: A
+            datasourceUid: cervejaria-pg
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: A
+              format: table
+              editorMode: code
+              rawQuery: true
+              rawSql: |
+                SELECT DISTINCT ON (t.codigo)
+                       t.codigo                         AS tanque,
+                       t.estilo                         AS estilo,
+                       l.temperatura_c - t.temp_max_c   AS excesso_c
+                FROM leituras_tanque l
+                JOIN tanques t ON t.id = l.tanque_id
+                WHERE l.momento > now() - interval '1 minute'
+                ORDER BY t.codigo, l.momento DESC
+          # C: a condição do alerta, excesso maior que zero
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        for: 0s
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severidade: critica
+        annotations:
+          # Liga a regra ao gráfico de temperatura: as mudanças de estado do alerta aparecem nele
+          __dashboardUid__: cervejaria
+          __panelId__: "5"
+          summary: '{{ $labels.tanque }} ({{ $labels.estilo }}) está acima da temperatura máxima'
+          description: 'Excesso atual: {{ printf "%.1f" $values.A.Value }} °C acima do limite. Verifique a refrigeração.'

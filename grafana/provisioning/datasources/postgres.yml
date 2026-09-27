@@ -1,0 +1,16 @@
+# Conecta o Grafana ao PostgreSQL assim que ele sobe, sem precisar configurar pela tela.
+apiVersion: 1
+
+datasources:
+  - name: Cervejaria (PostgreSQL)
+    uid: cervejaria-pg
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: grafana_leitor # usuário só de leitura (sql/03_usuario_grafana.sql)
+    isDefault: true
+    jsonData:
+      database: cervejaria
+      sslmode: disable
+      timeInterval: 5s # o simulador grava a cada 5 segundos
+    secureJsonData:
+      password: leitor
