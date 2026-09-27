@@ -47,7 +47,7 @@ flowchart LR
 
 - [Git](https://git-scm.com/downloads)
 - [Docker](https://docs.docker.com/get-docker/) com Docker Compose (no Windows e no macOS, o Docker Desktop já inclui os dois)
-- Portas **3000** e **5432** livres
+- Porta **3000** livre
 
 Não é preciso instalar Python, PostgreSQL nem Grafana: cada um roda dentro do seu container.
 
@@ -97,8 +97,8 @@ Depois do login, abre o dashboard **Cervejaria Byte: Monitoramento da Produção
    - o card **Refrigeração** do TQ-02 fica vermelho na hora;
    - uma linha vertical vermelha (anotação) aparece nos gráficos;
    - a temperatura do TQ-02 sobe cerca de 2,5 °C por minuto;
-   - em **cerca de 1 minuto** ela passa de 21 °C, o limite da IPA, e o alerta fica **Pendente** (amarelo) em **Alertas ativos**;
-   - 20 segundos depois ele **dispara** (vermelho): aparece em **Tanques em alerta**, no menu **Alertas** do Grafana, e o terminal do `notificador` mostra:
+   - em **cerca de 1 minuto** ela passa de 21 °C, o limite da IPA: o card **Tanques em alerta** vai para 1 e o alerta fica **Pendente** (amarelo) em **Alertas ativos**;
+   - 20 segundos depois o alerta **dispara** (vermelho): aparece no menu **Alertas** do Grafana e o terminal do `notificador` mostra:
 
      ```
      [ALERTA DISPARADO] TQ-02 (IPA) está acima da temperatura máxima
@@ -141,7 +141,8 @@ O script [`scripts/teste-e2e.sh`](scripts/teste-e2e.sh) faz sozinho todo o rotei
 ==> Provisionamento do Grafana
     OK: fonte de dados conectada ao banco
     OK: dashboard carregado
-    OK: regra de alerta avaliando o TQ-02
+==> Estado inicial
+    OK: alerta do TQ-02 em Normal
 ==> Simulando falha na refrigeração do TQ-02
     OK: alerta ficou Pendente
     OK: alerta disparou
@@ -153,7 +154,7 @@ O script [`scripts/teste-e2e.sh`](scripts/teste-e2e.sh) faz sozinho todo o rotei
 Tudo certo: sensores -> PostgreSQL -> Grafana -> alerta -> notificação.
 ```
 
-Leva uns 2 minutos e não apaga dados. O mesmo teste roda no GitHub Actions a cada push ([`e2e.yml`](.github/workflows/e2e.yml)); o selo no topo deste README mostra o resultado mais recente.
+Leva uns 2 minutos, não apaga dados e pode ser rodado várias vezes seguidas. O mesmo teste roda no GitHub Actions a cada push ([`e2e.yml`](.github/workflows/e2e.yml)); o selo no topo deste README mostra o resultado mais recente.
 
 ## Configuração
 
@@ -208,7 +209,7 @@ grafana-cervejaria/
 
 ## Problemas comuns
 
-- **`port is already allocated`:** outro programa está usando a porta 3000 ou 5432. Pare esse programa ou troque a porta da esquerda no `docker-compose.yml` (ex.: `"3001:3000"` e acesse `localhost:3001`).
+- **`port is already allocated`:** outro programa está usando a porta 3000. Pare esse programa ou troque a porta da esquerda no `docker-compose.yml` (ex.: `"3001:3000"` e acesse `localhost:3001`).
 - **Dashboard vazio:** confira se o simulador está rodando com `docker compose logs simulador`.
 - **Gráficos com um buraco no meio:** o ambiente ficou parado e o simulador não grava enquanto está desligado. Para recomeçar com 6 horas de histórico novinho, rode `docker compose down -v` e `docker compose up -d`.
 - **Mudei um arquivo de `sql/` e nada aconteceu:** esses scripts só rodam quando o banco é criado. Rode `docker compose down -v` e depois `docker compose up -d`.

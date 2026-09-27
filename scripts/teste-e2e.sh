@@ -43,7 +43,8 @@ print(next(a['state'] for g in regras for r in g['rules'] for a in r.get('alerts
 }
 alerta_em() { [ "$(estado_alerta)" = "$1" ]; }
 tem_leituras() { [ "$(docker compose exec -T postgres psql -U cervejaria -tAc 'SELECT count(*) FROM leituras_tanque')" -gt 0 ]; }
-notificou() { docker compose logs notificador | grep -q "\[$1\] $TANQUE"; }
+# Só olha logs deste teste, para uma execução anterior não gerar falso positivo
+notificou() { docker compose logs --since "$INICIO" notificador | grep -q "\[$1\] $TANQUE"; }
 
 passo "Subindo o ambiente"
 docker compose build --quiet
@@ -56,7 +57,12 @@ esperar "simulador gravando leituras no PostgreSQL" 60 tem_leituras
 passo "Provisionamento do Grafana"
 esperar "fonte de dados conectada ao banco" 30 sh -c "curl -fsS -u $AUTH $GRAFANA/api/datasources/uid/cervejaria-pg/health | grep -q '\"status\":\"OK\"'"
 esperar "dashboard carregado" 30 api /api/dashboards/uid/cervejaria
-esperar "regra de alerta avaliando o $TANQUE" 60 alerta_em Normal
+
+passo "Estado inicial"
+# Garante o ponto de partida, caso um teste manual tenha deixado o tanque desligado
+docker compose exec -T simulador python refrigeracao.py ligar "$TANQUE"
+esperar "alerta do $TANQUE em Normal" 120 alerta_em Normal
+INICIO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 passo "Simulando falha na refrigeração do $TANQUE"
 docker compose exec -T simulador python refrigeracao.py desligar "$TANQUE"

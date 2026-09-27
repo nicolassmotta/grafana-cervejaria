@@ -21,7 +21,19 @@ def formatar(alerta: dict) -> str:
     rotulos = alerta.get("labels", {})
     anotacoes = alerta.get("annotations", {})
     agora = f"{datetime.now():%H:%M:%S}"
-    if alerta.get("status") == "firing":
+    disparado = alerta.get("status") == "firing"
+
+    # Alertas que o próprio Grafana cria quando a consulta da regra falha ou volta vazia
+    if rotulos.get("alertname") == "DatasourceNoData":
+        if disparado:
+            return f"{agora}  [SEM DADOS] Nenhuma leitura dos tanques no último minuto. O simulador está rodando?"
+        return f"{agora}  [DADOS NORMALIZADOS] As leituras dos tanques voltaram a chegar"
+    if rotulos.get("alertname") == "DatasourceError":
+        if disparado:
+            return f"{agora}  [ERRO] O Grafana não conseguiu consultar o banco de dados"
+        return f"{agora}  [ERRO RESOLVIDO] O Grafana voltou a consultar o banco de dados"
+
+    if disparado:
         return (
             f"{agora}  [ALERTA DISPARADO] {anotacoes.get('summary', rotulos.get('alertname', ''))}\n"
             f"          {anotacoes.get('description', '')}\n"
@@ -40,7 +52,7 @@ class Receptor(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
-    def log_message(self, *args) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         pass  # esconde o log padrão de cada requisição HTTP
 
 

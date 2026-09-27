@@ -17,8 +17,9 @@ services:
       POSTGRES_DB: cervejaria
       POSTGRES_USER: cervejaria
       POSTGRES_PASSWORD: cervejaria
-    ports:
-      - "5432:5432"
+    # Sem "ports": o banco só é acessível pelos outros containers, então não conflita com
+    # um PostgreSQL instalado na máquina. Para acessar de fora (DBeaver etc.), adicione:
+    #   ports: ["5433:5432"]
     volumes:
       # Scripts .sql desta pasta rodam automaticamente na primeira inicialização do banco
       - ./sql:/docker-entrypoint-initdb.d:ro

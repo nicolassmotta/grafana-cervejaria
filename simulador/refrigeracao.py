@@ -10,11 +10,14 @@ Com a refrigeração desligada, o simulador faz a temperatura do tanque subir
 e, ao passar do limite, o alerta configurado no Grafana dispara.
 """
 
+import os
 import sys
 
 import psycopg
 
-from simulador import DATABASE_URL
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://cervejaria:cervejaria@localhost:5432/cervejaria"
+)
 
 USO = "uso: python refrigeracao.py (ligar|desligar) TQ-XX  |  python refrigeracao.py status"
 
@@ -29,11 +32,16 @@ def mostrar_status(conn: psycopg.Connection) -> None:
 def alterar(conn: psycopg.Connection, acao: str, codigo: str) -> None:
     ligar = acao == "ligar"
     tanque = conn.execute(
-        "UPDATE tanques SET refrigeracao_ligada = %s WHERE codigo = %s RETURNING id",
-        (ligar, codigo),
+        "SELECT id, refrigeracao_ligada FROM tanques WHERE codigo = %s", (codigo,)
     ).fetchone()
     if tanque is None:
         sys.exit(f"Tanque {codigo} não existe. Use: TQ-01, TQ-02, TQ-03 ou TQ-04")
+    if tanque[1] == ligar:
+        # Sem mudança de estado, não grava evento repetido no gráfico
+        print(f"{codigo}: refrigeração já está {'ligada' if ligar else 'desligada'}")
+        return
+
+    conn.execute("UPDATE tanques SET refrigeracao_ligada = %s WHERE id = %s", (ligar, tanque[0]))
 
     tipo, descricao = (
         ("normalizado", f"{codigo}: refrigeração religada")
