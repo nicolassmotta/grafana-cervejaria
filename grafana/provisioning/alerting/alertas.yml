@@ -1,6 +1,26 @@
-# Regra de alerta: dispara quando algum tanque passa da temperatura máxima do seu estilo.
-# O Grafana roda a query a cada 10s e cria um alerta separado para cada tanque (cada linha do resultado).
+# Alertas da fábrica, em três partes:
+#   1. contactPoints: PARA ONDE os avisos vão (aqui, o serviço notificador via webhook)
+#   2. policies:      COMO os avisos são agrupados e com que frequência são reenviados
+#   3. groups:        QUANDO disparar (a regra de temperatura)
 apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Central da fábrica
+    receivers:
+      - uid: central-da-fabrica
+        type: webhook
+        settings:
+          url: http://notificador:8000/alertas
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: Central da fábrica
+    group_by: [alertname, tanque] # um aviso separado por tanque
+    group_wait: 1s # avisa logo que o alerta dispara
+    group_interval: 10s
+    repeat_interval: 1h # enquanto continuar disparado, repete o aviso a cada hora
 
 groups:
   - orgId: 1
@@ -8,6 +28,7 @@ groups:
     folder: Cervejaria
     interval: 10s
     rules:
+      # A query roda a cada 10s e cada linha do resultado (um tanque) vira um alerta separado
       - uid: temperatura-acima-do-limite
         title: Temperatura acima do limite
         condition: C
@@ -43,7 +64,7 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
-        for: 0s
+        for: 20s # fica "Pendente" por 20s antes de disparar, para evitar alarme falso por um pico isolado
         noDataState: NoData
         execErrState: Error
         labels:

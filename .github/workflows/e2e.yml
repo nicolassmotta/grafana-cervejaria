@@ -1,0 +1,25 @@
+# A cada push, sobe o ambiente numa máquina limpa do GitHub e roda o teste de ponta a ponta.
+name: Teste ponta a ponta
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sobe o ambiente, simula uma falha e confere alerta e notificação
+        run: ./scripts/teste-e2e.sh
+
+      - name: Mostra os logs se algo falhou
+        if: failure()
+        run: docker compose logs
+
+      - name: Derruba o ambiente
+        if: always()
+        run: docker compose down -v

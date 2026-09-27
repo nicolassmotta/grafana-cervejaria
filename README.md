@@ -1,8 +1,10 @@
 # Cervejaria Byte: monitoramento com Grafana
 
+[![Teste ponta a ponta](https://github.com/nicolassmotta/grafana-cervejaria/actions/workflows/e2e.yml/badge.svg)](https://github.com/nicolassmotta/grafana-cervejaria/actions/workflows/e2e.yml)
+
 Demonstração do [Grafana](https://grafana.com) para a disciplina **Tópicos em Programação 3 (CC05Z, UTFPR, 2026/2)**.
 
-Uma cervejaria fictícia tem 4 tanques de fermentação e 2 linhas de envase. Um script Python simula os sensores e grava as leituras num PostgreSQL. O Grafana lê esse banco e mostra tudo em tempo real, com um alerta que dispara quando algum tanque esquenta demais.
+Uma cervejaria fictícia tem 4 tanques de fermentação e 2 linhas de envase. Um script Python simula os sensores e grava as leituras num PostgreSQL. O Grafana lê esse banco e mostra tudo em tempo real. Quando algum tanque esquenta demais, um alerta dispara e a central de avisos da fábrica é notificada.
 
 ![Dashboard da Cervejaria Byte com um alerta disparado](docs/dashboard.png)
 
@@ -15,6 +17,7 @@ flowchart LR
     S["simulador<br/>(Python)"] -- "INSERT a cada 5s" --> P[("postgres<br/>(PostgreSQL)")]
     G["grafana<br/>localhost:3000"] -- "SELECT (usuário só leitura)" --> P
     V(("Você, no<br/>navegador")) --> G
+    G -- "webhook quando<br/>um alerta dispara" --> N["notificador<br/>(Python)"]
 ```
 
 | Serviço | O que faz | Onde está o código |
@@ -22,6 +25,7 @@ flowchart LR
 | `postgres` | Guarda cadastros (tanques, linhas) e as séries temporais de leituras | [`sql/`](sql/) |
 | `simulador` | Gera leituras de temperatura, pressão, pH e produção a cada 5 segundos | [`simulador/`](simulador/) |
 | `grafana` | Dashboard, variáveis, anotações e alertas, tudo configurado por arquivo | [`grafana/`](grafana/) |
+| `notificador` | Recebe as notificações de alerta do Grafana e mostra no terminal | [`notificador/`](notificador/) |
 
 ## Funcionalidades do Grafana demonstradas
 
@@ -32,7 +36,11 @@ flowchart LR
 - **Anotações:** eventos da tabela `eventos` (falhas e normalizações) aparecem como linhas verticais nos gráficos.
 - **Thresholds e value mappings:** cores mudam conforme o valor; `0`/`1` viram "DESLIGADA"/"Ligada".
 - **Atualização automática:** o dashboard recarrega a cada 5 segundos.
-- **Alertas:** uma regra avalia os tanques a cada 10 segundos e cria um alerta por tanque acima do limite ([`alertas.yml`](grafana/provisioning/alerting/alertas.yml)).
+- **Alertas** ([`alertas.yml`](grafana/provisioning/alerting/alertas.yml)):
+  - *regra:* avalia os tanques a cada 10 segundos e cria um alerta separado para cada tanque acima do limite;
+  - *estado pendente:* o alerta passa 20 segundos em **Pendente** antes de disparar, para ignorar picos isolados;
+  - *contact point:* quando dispara ou resolve, o Grafana manda um webhook para o `notificador`. O mesmo mecanismo serve para Slack, Teams, Telegram, e-mail e outros;
+  - *política de notificação:* agrupa os avisos por tanque e define de quanto em quanto tempo repetir.
 - **Provisionamento (configuração como código):** nada é configurado na mão. Fonte de dados, dashboard e alerta vêm de arquivos versionados no Git.
 
 ## Pré-requisitos
@@ -42,6 +50,8 @@ flowchart LR
 - Portas **3000** e **5432** livres
 
 Não é preciso instalar Python, PostgreSQL nem Grafana: cada um roda dentro do seu container.
+
+Para o [teste automatizado](#teste-automatizado), também é preciso `bash`, `curl` e `python3` (Linux, macOS ou WSL no Windows).
 
 ## Instalação
 
@@ -57,7 +67,7 @@ Na primeira vez, o Docker baixa as imagens (uns 2 minutos, dependendo da interne
 docker compose ps
 ```
 
-Os três serviços devem aparecer como `Up` (o `postgres`, como `healthy`).
+Os quatro serviços devem aparecer como `Up` (o `postgres`, como `healthy`).
 
 ## Acesso
 
@@ -71,10 +81,10 @@ Depois do login, abre o dashboard **Cervejaria Byte: Monitoramento da Produção
 
 ## Testando: simulando uma falha
 
-1. Acompanhe o simulador em um terminal:
+1. Acompanhe o simulador e a central de avisos em um terminal:
 
    ```bash
-   docker compose logs -f simulador
+   docker compose logs -f simulador notificador
    ```
 
 2. Em outro terminal, desligue a refrigeração do tanque TQ-02:
@@ -87,7 +97,13 @@ Depois do login, abre o dashboard **Cervejaria Byte: Monitoramento da Produção
    - o card **Refrigeração** do TQ-02 fica vermelho na hora;
    - uma linha vertical vermelha (anotação) aparece nos gráficos;
    - a temperatura do TQ-02 sobe cerca de 2,5 °C por minuto;
-   - em **cerca de 1 minuto** ela passa de 21 °C, o limite da IPA, e o alerta dispara: aparece em **Alertas ativos**, em **Tanques em alerta** e no menu **Alertas** do Grafana.
+   - em **cerca de 1 minuto** ela passa de 21 °C, o limite da IPA, e o alerta fica **Pendente** (amarelo) em **Alertas ativos**;
+   - 20 segundos depois ele **dispara** (vermelho): aparece em **Tanques em alerta**, no menu **Alertas** do Grafana, e o terminal do `notificador` mostra:
+
+     ```
+     [ALERTA DISPARADO] TQ-02 (IPA) está acima da temperatura máxima
+               Excesso atual: 0.9 °C acima do limite. Verifique a refrigeração.
+     ```
 
 4. Religue a refrigeração:
 
@@ -95,7 +111,7 @@ Depois do login, abre o dashboard **Cervejaria Byte: Monitoramento da Produção
    docker compose exec simulador python refrigeracao.py ligar TQ-02
    ```
 
-   A temperatura volta ao normal e o alerta é resolvido em uns 20 segundos.
+   A temperatura volta ao normal, o alerta é resolvido em uns 20 segundos e o `notificador` mostra `[ALERTA RESOLVIDO] TQ-02 (IPA) voltou ao normal`.
 
 Para ver o estado de todos os tanques:
 
@@ -109,6 +125,35 @@ docker compose exec simulador python refrigeracao.py status
 docker compose exec postgres psql -U cervejaria -c "SELECT * FROM tanques;"
 docker compose exec postgres psql -U cervejaria -c "SELECT * FROM leituras_tanque ORDER BY momento DESC LIMIT 8;"
 ```
+
+## Teste automatizado
+
+O script [`scripts/teste-e2e.sh`](scripts/teste-e2e.sh) faz sozinho todo o roteiro acima e confere cada etapa:
+
+```bash
+./scripts/teste-e2e.sh
+```
+
+```
+==> Serviços
+    OK: Grafana respondendo
+    OK: simulador gravando leituras no PostgreSQL
+==> Provisionamento do Grafana
+    OK: fonte de dados conectada ao banco
+    OK: dashboard carregado
+    OK: regra de alerta avaliando o TQ-02
+==> Simulando falha na refrigeração do TQ-02
+    OK: alerta ficou Pendente
+    OK: alerta disparou
+    OK: notificador recebeu o aviso de alerta disparado
+==> Religando a refrigeração do TQ-02
+    OK: alerta voltou ao normal
+    OK: notificador recebeu o aviso de alerta resolvido
+
+Tudo certo: sensores -> PostgreSQL -> Grafana -> alerta -> notificação.
+```
+
+Leva uns 2 minutos e não apaga dados. O mesmo teste roda no GitHub Actions a cada push ([`e2e.yml`](.github/workflows/e2e.yml)); o selo no topo deste README mostra o resultado mais recente.
 
 ## Configuração
 
@@ -138,7 +183,7 @@ docker compose down -v   # para tudo e APAGA os dados (o próximo "up" recomeça
 
 ```
 grafana-cervejaria/
-├── docker-compose.yml               # os três serviços
+├── docker-compose.yml               # os quatro serviços
 ├── sql/                             # rodam sozinhos na 1ª inicialização do banco
 │   ├── 01_schema.sql                # tabelas
 │   ├── 02_dados_iniciais.sql        # tanques e linhas de envase
@@ -148,11 +193,16 @@ grafana-cervejaria/
 │   ├── refrigeracao.py              # liga/desliga a refrigeração (simula falhas)
 │   ├── requirements.txt
 │   └── Dockerfile
+├── notificador/
+│   ├── notificador.py               # recebe o webhook de alerta do Grafana
+│   └── Dockerfile
+├── scripts/teste-e2e.sh             # teste de ponta a ponta
+├── .github/workflows/e2e.yml        # roda o teste a cada push
 └── grafana/
     ├── provisioning/
     │   ├── datasources/postgres.yml  # conexão com o banco
     │   ├── dashboards/dashboards.yml # onde procurar dashboards
-    │   └── alerting/alertas.yml      # regra de alerta
+    │   └── alerting/alertas.yml      # regra, contact point e política
     └── dashboards/cervejaria.json   # o dashboard
 ```
 
@@ -160,6 +210,7 @@ grafana-cervejaria/
 
 - **`port is already allocated`:** outro programa está usando a porta 3000 ou 5432. Pare esse programa ou troque a porta da esquerda no `docker-compose.yml` (ex.: `"3001:3000"` e acesse `localhost:3001`).
 - **Dashboard vazio:** confira se o simulador está rodando com `docker compose logs simulador`.
+- **Gráficos com um buraco no meio:** o ambiente ficou parado e o simulador não grava enquanto está desligado. Para recomeçar com 6 horas de histórico novinho, rode `docker compose down -v` e `docker compose up -d`.
 - **Mudei um arquivo de `sql/` e nada aconteceu:** esses scripts só rodam quando o banco é criado. Rode `docker compose down -v` e depois `docker compose up -d`.
 
 ## Versões

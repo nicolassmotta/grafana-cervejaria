@@ -1,0 +1,4 @@
+# Garante finais de linha LF mesmo se o repositório for clonado no Windows.
+# Sem isso, scripts .sh e .py podem quebrar dentro dos containers Linux.
+* text=auto eol=lf
+*.png binary
