@@ -10,6 +10,10 @@ Uma cervejaria fictícia tem 4 tanques de fermentação e 2 linhas de envase. Um
 
 > Todos os dados são simulados. A cervejaria, os tanques e os números não existem.
 
+## Material da apresentação
+
+[Slides da apresentação](docs/apresentacao-grafana.pdf): o que é o Grafana, quem usa e como ele funciona por dentro.
+
 ## Arquitetura
 
 ```mermaid
@@ -197,6 +201,7 @@ grafana-cervejaria/
 ├── notificador/
 │   ├── notificador.py               # recebe o webhook de alerta do Grafana
 │   └── Dockerfile
+├── docs/                            # slides e print do dashboard
 ├── scripts/teste-e2e.sh             # teste de ponta a ponta
 ├── .github/workflows/e2e.yml        # roda o teste a cada push
 └── grafana/
