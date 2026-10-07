@@ -21,8 +21,9 @@ services:
     # um PostgreSQL instalado na máquina. Para acessar de fora (DBeaver etc.), adicione:
     #   ports: ["5433:5432"]
     volumes:
-      # Scripts .sql desta pasta rodam automaticamente na primeira inicialização do banco
-      - ./sql:/docker-entrypoint-initdb.d:ro
+      # Scripts .sql desta pasta rodam automaticamente na primeira inicialização do banco.
+      # O "z" libera a pasta para o container em Linux com SELinux (Fedora, RHEL); nos outros é ignorado.
+      - ./sql:/docker-entrypoint-initdb.d:ro,z
       - dados-postgres:/var/lib/postgresql
     healthcheck:
       # -h 127.0.0.1: só responde "pronto" depois que os scripts de sql/ terminaram de rodar
@@ -59,8 +60,8 @@ services:
       GF_USERS_DEFAULT_LANGUAGE: pt-BR
     volumes:
       # "Provisionamento": fonte de dados, dashboard e alertas definidos em arquivos (configuração como código)
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro,z
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro,z
       - dados-grafana:/var/lib/grafana
     depends_on:
       postgres:
