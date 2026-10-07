@@ -12,7 +12,7 @@ Uma cervejaria fictícia tem 4 tanques de fermentação e 2 linhas de envase. Um
 
 ## Material da apresentação
 
-[Slides da apresentação](docs/apresentacao-grafana.pdf): o que é o Grafana, quem usa e como ele funciona por dentro.
+[Slides da apresentação](docs/apresentacao-grafana.pdf): o que é o Grafana, por que e por quem foi criado, quem usa e como ele funciona por dentro, do SQL ao gráfico. O resumo técnico está em [O Grafana por dentro](#o-grafana-por-dentro).
 
 ## Arquitetura
 
@@ -46,6 +46,131 @@ flowchart LR
   - *contact point:* quando dispara ou resolve, o Grafana manda um webhook para o `notificador`. O mesmo mecanismo serve para Slack, Teams, Telegram, e-mail e outros;
   - *política de notificação:* agrupa os avisos por tanque e define de quanto em quanto tempo repetir.
 - **Provisionamento (configuração como código):** nada é configurado na mão. Fonte de dados, dashboard e alerta vêm de arquivos versionados no Git.
+
+## O Grafana por dentro
+
+### Por que e por quem foi criado
+
+Em dezembro de 2013, Torkel Ödegaard, desenvolvedor e consultor, tinha as métricas do time no Graphite, mas montar dashboards e escrever queries na tela dele era difícil e demorado. Ele fez um fork do Kibana 3 (que fazia dashboards bons, só que para o Elasticsearch) e trocou a consulta por um editor de queries do Graphite. A v1.0 saiu em 19 de janeiro de 2014. Em 2014, Torkel se juntou a Raj Dutt e Anthony Woods na raintank, a empresa que virou a Grafana Labs. O projeto é open source (AGPL-3.0 desde 2021) e a empresa vive de Grafana Cloud, Enterprise e suporte.
+
+A ideia de origem continua a mesma: a tela fica separada de onde os dados moram. O Grafana não guarda métricas, ele consulta quem guarda.
+
+| Ano | Versão | O que mudou |
+| --- | --- | --- |
+| 2014 | 1.0 | App que rodava todo no navegador, lendo o Graphite |
+| 2015 | 2.0 | Servidor em Go, usuários e banco próprio |
+| 2016 | 4.0 | Alertas |
+| 2020 | 7.0 | Data frames e transformações |
+| 2021 | 8.0 | Alertas unificados, painel Time series com uPlot, licença AGPL-3.0 |
+| 2025-26 | 12 e 13 | Dashboards como código (Git Sync, schema v2) |
+
+Fontes: [4 years of Grafana](https://grafana.com/blog/2018/01/30/4-years-of-grafana/), [Grafana Labs at 5](https://grafana.com/blog/2019/10/04/grafana-labs-at-5-how-we-got-here-and-where-were-going), [What's new](https://grafana.com/docs/grafana/latest/whatsnew/), [troca de licença](https://grafana.com/blog/2021/04/20/grafana-loki-tempo-relicensing-to-agplv3/).
+
+### As três peças
+
+| Peça | Feita em | O que faz |
+| --- | --- | --- |
+| Front-end, no navegador | TypeScript e React | Monta a tela e desenha os painéis. Nunca fala com a fonte de dados. |
+| `grafana-server` | Go | API HTTP, login e permissões, execução das queries, motor de alertas e provisionamento. |
+| Plugins de fonte de dados | Go (SDK da Grafana) | Sabem falar com cada fonte. Os nativos, como o PostgreSQL daqui, rodam dentro do servidor; os externos rodam em processo separado e conversam com ele por gRPC. |
+
+O servidor também tem um banco interno (SQLite por padrão, MySQL ou PostgreSQL em produção) para usuários, permissões, dashboards e estado dos alertas. As leituras dos tanques nunca entram nele: ficam no PostgreSQL da demo.
+
+### Do SQL ao gráfico
+
+Exemplo real com o painel **Temperatura dos tanques**.
+
+**1. O navegador pede os dados.** Ele manda um `POST /api/ds/query` com o período da tela e as queries do painel (resumido):
+
+```json
+{
+  "from": "now-30m", "to": "now",
+  "queries": [{
+    "refId": "A",
+    "datasource": { "uid": "cervejaria-pg" },
+    "format": "time_series",
+    "rawSql": "SELECT $__timeGroupAlias(l.momento, $__interval), ...",
+    "maxDataPoints": 918,
+    "intervalMs": 5000
+  }]
+}
+```
+
+`maxDataPoints` é a largura do painel em pixels e `intervalMs` vira o `$__interval`: o período dividido pelos pontos, nunca abaixo do mínimo da fonte (`timeInterval: 5s` em [`postgres.yml`](grafana/provisioning/datasources/postgres.yml)). O editor do painel mostra esses dois números como `MD = auto = 918` e `Intervalo = 5s`. O navegador só manda o `uid` da fonte, nunca endereço ou senha.
+
+**2. O servidor expande as macros e consulta o banco.** O SQL que chega ao PostgreSQL:
+
+```sql
+SELECT floor(extract(epoch from l.momento)/5)*5 AS "time",
+       t.codigo || ' ' || t.estilo AS metric,
+       avg(l.temperatura_c) AS value
+FROM leituras_tanque l
+JOIN tanques t ON t.id = l.tanque_id
+WHERE l.momento BETWEEN '2026-10-07T00:58:36.681Z' AND '2026-10-07T01:03:36.681Z'
+  AND t.codigo IN ('TQ-02')
+GROUP BY 1, 2
+ORDER BY 1
+```
+
+**3. A resposta volta como data frame.** É uma tabela colunar: cada campo tem nome, tipo e um vetor de valores. A coluna `metric` virou o nome da série, e é assim que uma query só gera uma linha por tanque:
+
+```json
+"results": { "A": { "frames": [{
+  "schema": {
+    "meta": { "type": "timeseries-wide" },
+    "fields": [
+      { "name": "Time", "type": "time" },
+      { "name": "TQ-02 IPA", "type": "number" } ] },
+  "data": { "values": [
+    [1791334720000, 1791334780000, ...],
+    [18.97, 19.03, ...] ] }
+}] } }
+```
+
+Toda fonte devolve esse mesmo formato, seja SQL, Prometheus ou Loki. Por isso qualquer painel desenha dados de qualquer fonte.
+
+**4. O navegador desenha.** O painel aplica as opções de campo (unidade, decimais, cores, thresholds) e entrega os vetores para a [uPlot](https://github.com/leeoniya/uPlot), a biblioteca que o painel Time series usa desde o Grafana 7.4. Ela pinta num `<canvas>`, não em SVG, e por isso aguenta milhares de pontos com refresh a cada 5 segundos.
+
+Para ver tudo isso ao vivo: editar o painel e clicar em **Inspetor da consulta**. Ou, pelo terminal:
+
+```bash
+curl -s -u admin:cervejaria -H 'Content-Type: application/json' \
+  -X POST localhost:3000/api/ds/query \
+  -d '{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"cervejaria-pg"},"format":"table","rawSql":"SELECT * FROM tanques"}]}'
+```
+
+### O JSON do dashboard
+
+O dashboard inteiro é um documento JSON, o *JSON model*. É isso que o Grafana grava no banco interno quando alguém clica em Salvar, o que se exporta e importa entre instalações, e o que a demo carrega do disco em [`cervejaria.json`](grafana/dashboards/cervejaria.json):
+
+```jsonc
+{
+  "uid": "cervejaria",                       // vai na URL: /d/cervejaria
+  "title": "Cervejaria Byte: Monitoramento da Produção",
+  "time": { "from": "now-1h", "to": "now" }, // período padrão
+  "refresh": "5s",                           // atualização automática
+  "templating": { "list": [ /* variável $tanque */ ] },
+  "annotations": { "list": [ /* eventos da fábrica */ ] },
+  "panels": [ /* 10 painéis */ ],
+  "schemaVersion": 41                        // versão do formato, para migrar arquivos antigos
+}
+```
+
+Cada painel tem sempre as mesmas partes:
+
+```jsonc
+{
+  "type": "timeseries",                          // qual visualização desenha
+  "title": "Temperatura dos tanques",
+  "datasource": { "uid": "cervejaria-pg" },      // qual fonte, só pelo uid
+  "targets": [{ "refId": "A", "rawSql": "SELECT $__timeGroupAlias(...)" }], // as consultas
+  "fieldConfig": { "defaults": { "unit": "celsius", "decimals": 1 } },        // como formatar
+  "options": { "tooltip": { "mode": "multi" } }, // legenda, tooltip
+  "gridPos": { "x": 0, "y": 5, "w": 16, "h": 10 } // posição numa grade de 24 colunas; h em blocos de 30 px
+}
+```
+
+No Grafana 13, o JSON fica em **Editar > Edit as code**, na barra lateral do dashboard. Fonte: [JSON model](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/).
 
 ## Pré-requisitos
 
