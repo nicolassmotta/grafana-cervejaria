@@ -16,12 +16,18 @@ Uma cervejaria fictícia tem 4 tanques de fermentação e 2 linhas de envase. Um
 
 ## Arquitetura
 
-```mermaid
-flowchart LR
-    S["simulador<br/>(Python)"] -- "INSERT a cada 5s" --> P[("postgres<br/>(PostgreSQL)")]
-    G["grafana<br/>localhost:3000"] -- "SELECT (usuário só leitura)" --> P
-    V(("Você, no<br/>navegador")) --> G
-    G -- "webhook quando<br/>um alerta dispara" --> N["notificador<br/>(Python)"]
+```text
+[simulador (Python)] -- INSERT a cada 5s --> [postgres (PostgreSQL)]
+                                                     ^
+                                                     |
+                                        SELECT (usuário só leitura)
+                                                     |
+[Você no navegador] --------------------> [grafana: localhost:3000]
+                                                     |
+                                        webhook de alerta
+                                                     |
+                                                     v
+                                          [notificador (Python)]
 ```
 
 | Serviço | O que faz | Onde está o código |
